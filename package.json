@@ -1,0 +1,20 @@
+{
+  "name": "test_bot",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MrRiloid/node-js-test-tg-bot.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MrRiloid/node-js-test-tg-bot/issues"
+  },
+  "homepage": "https://github.com/MrRiloid/node-js-test-tg-bot#readme",
+  "description": ""
+}
