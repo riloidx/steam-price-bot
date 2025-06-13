@@ -1,46 +1,89 @@
-const env = require('dotenv');
 const axios = require('axios');
-const cheerio = require('cheerio');
+require('dotenv').config();
 const {Bot} = require("grammy");
-
-env.config();
 
 const bot = new Bot(process.env.TG_BOT_API_KEY);
 
+const regions = ['us', 'kz', 'ua', 'cn'];
 
-async function findGame(gameName) {
+async function findGameId(gameName) {
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
     const CX = process.env.CX;
-    const query = gameName + ' steam';
+    const query = `${gameName} steam`;
 
-    const result = await axios.get(
+    const response = await axios.get(
         `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${CX}&q=${encodeURIComponent(query)}`
     );
 
-    if (!result.data) {
+    if (!response.data.items) {
         throw new Error("No results found");
     }
-    const data = result.data.items[0];
+    const data = response.data.items[0];
 
-    return parseGameUrl(data.link);
+    return getGameIdFromUrl(data.link);
 }
 
-function parseGameUrl(data) {
-    const params = data.split('/');
+function getGameIdFromUrl(url) {
+    const params = url.split('/');
+    return { id: params[4] };
+}
+
+async function findGameData(gameId, region = 'us') {
+    const response = await axios.get(
+        `https://store.steampowered.com/api/appdetails?appids=${gameId}&cc=${region}`
+    );
+
+    return response.data[String(gameId)].data
+}
+
+async function getFormatedGameInfo(gameId) {
+    const data = await findGameData(gameId);
+
+    const url = `https://store.steampowered.com/app/${gameId}/`;
+
+    let prices = [];
+    if (data.is_free) {
+        prices.push('Бесплатно');
+    }
+    else {
+        prices = await findPrices(gameId);
+    }
+
     return {
-        id: params[4],
-        name: params[5].split('_').join(' ')
+        id: data.steam_appid,
+        name: data.name,
+        developers: data.developers?.join(', ') || 'Неизвестно',
+        prices: prices,
+        link: url,
+        image: data.header_image
     };
 }
 
-async function getGamePrice() {}
+async function findPrices(gameId) {
+    const prices = [];
 
+    for (const region in regions) {
+        const data  = await findGameData(gameId, regions[region]);
+
+        const price = data.price_overview;
+
+        prices.push({
+            currency: price.currency,
+            final: price.final / 100,
+            final_formatted: price.final_formatted,
+            discount: price.discount_percent
+        });
+    }
+
+    return prices;
+}
 
 async function main() {
-    const gameName = 'Hades 2';
+    const gameName = 'cyberpunk';
 
-    const game = await findGame(gameName);
-    console.log(game);
+    const game = await findGameId(gameName);
+    const data = await getFormatedGameInfo(game.id);
+    console.log(data);
 }
 
 main();
