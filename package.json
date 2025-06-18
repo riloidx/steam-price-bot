@@ -1,9 +1,9 @@
 {
   "name": "test_bot",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
-    "start": "nodemon index.js"
+    "start": "nodemon src/index.js"
   },
   "private": true,
   "repository": {
@@ -21,6 +21,8 @@
     "axios": "^1.9.0",
     "dotenv": "^16.5.0",
     "grammy": "^1.36.3",
-    "nodemon": "^3.1.10"
+    "mysql2": "^3.14.1",
+    "nodemon": "^3.1.10",
+    "sequelize": "^6.37.7"
   }
 }
