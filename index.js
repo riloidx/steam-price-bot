@@ -120,6 +120,19 @@ async function getGameInfo(gameName) {
     return data;
 }
 
+function formatPrices(prices) {
+    let pricesText = '';
+    prices.forEach(price => {
+        pricesText += `\n${price.final_formatted} \u2248 ${price.converted.formatted}`;
+    })
+    return pricesText;
+}
+
+function formatSendingText(data) {
+    const pricesText = formatPrices(data.prices);
+    return `Название: ${data.name}\nРазработчик: ${data.developers}\nЦены: ${pricesText}\nСкидка: ${data.prices[0].discount}%\n\nСыллка на игру: ${data.link}`;
+}
+
 bot.command('start', async (ctx) => {
     const chatId = ctx.msg.chat.id;
     const greet = 'Привет, я бот который поможет тебе узнать сколько денег тебе нужно закинуть в BYN, ' +
@@ -133,14 +146,7 @@ bot.command('start', async (ctx) => {
 bot.on('message', async (ctx) => {
     try {
         const data = await getGameInfo(ctx.update.message.text);
-        let pricesText = '';
-        data.prices.forEach(price => {
-            pricesText += `\n${price.final_formatted} \u2248 ${price.converted.formatted}`;
-        })
-
-        const text = `Название: ${data.name}\nРазработчик: ${data.developers}\nЦены: ${pricesText}\nСкидка: ${data.prices[0].discount}%\n\nСыллка на игру: ${data.link}`;
-
-        await ctx.replyWithPhoto(data.image, {caption: text});
+        await ctx.replyWithPhoto(data.image, {caption: formatSendingText(data)});
     } catch (error) {
         console.log(error);
         await ctx.reply('Произошла ошибка, повторите попытку');
