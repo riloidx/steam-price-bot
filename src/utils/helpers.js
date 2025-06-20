@@ -7,12 +7,12 @@ function getGameIdFromUrl(url) {
 }
 
 function formatPrices(price) {
-    return `\n${price.final_formatted} \u2248 ${price.converted.formatted}`;
+    return `${price.final_formatted} \u2248 ${price.converted.formatted}`;
 }
 
 function formatSendingText(data) {
     const pricesText = formatPrices(data.prices);
-    return `Название: ${data.name}\nРазработчик: ${data.developers}\nЦены: ${pricesText}\nСкидка: ${data.prices.discount}%\n\nСсылка на игру: ${data.link}`;
+    return `Название: ${data.name}\nРазработчик: ${data.developers}\nЦена: ${pricesText}\nСкидка: ${data.prices.discount}%\n\nСсылка на игру: ${data.link}`;
 }
 
 function getRegionKeyboard() {

@@ -1,8 +1,8 @@
-const { helper } = require('../utils');
-const { steamService } = require('../services');
-const { InlineKeyboard } = require('grammy');
+const {helper} = require('../utils');
+const {steamService} = require('../services');
+const {InlineKeyboard} = require('grammy');
 const User = require('../models/user');
-const { regions, telegram} = require("../config");
+const {regions, telegram} = require("../config");
 
 function setupBotHandlers(bot) {
     bot.command('start', async (ctx) => {
@@ -12,16 +12,15 @@ function setupBotHandlers(bot) {
         const gameToSearchMsg = 'Введите название игры';
 
         const [userInstance, created] = await User.findOrCreate({
-            where: { telegram_id: ctx.from.id },
-            defaults: { telegram_id: ctx.from.id }
+            where: {telegram_id: ctx.from.id},
+            defaults: {telegram_id: ctx.from.id}
         });
 
         await ctx.reply(greet);
 
         if (userInstance.region === undefined) {
             await ctx.reply(regionMsg, {reply_markup: helper.getRegionKeyboard()});
-        }
-        else {
+        } else {
             await ctx.reply(gameToSearchMsg);
         }
     });
@@ -39,8 +38,8 @@ function setupBotHandlers(bot) {
         }
 
         await User.update(
-            { region: regionCode },
-            { where: { telegram_id: ctx.from.id } }
+            {region: regionCode},
+            {where: {telegram_id: ctx.from.id}}
         );
 
         await ctx.answerCallbackQuery(`✅ Регион: ${regions[regionCode]}`);
@@ -54,16 +53,21 @@ function setupBotHandlers(bot) {
                     telegram_id: ctx.from.id
                 }
             });
+
             const data = await steamService.getGameInfo(ctx.message.text, userInstance.region);
-            await ctx.replyWithPhoto(data.image, { caption: helper.formatSendingText(data) });
+            await ctx.replyWithPhoto(data.image, {caption: helper.formatSendingText(data)});
+
         } catch (error) {
-            console.error('Error processing game info:', error);
-            await ctx.reply('Произошла ошибка, повторите попытку');
+            if (error.message.includes('is_free')) {
+                await ctx.reply('Похоже эта игра недоступна в вашем регионе');
+            }
+            else {
+                console.error('Error processing game info:', error);
+                await ctx.reply('Произошла ошибка, повторите попытку');
+            }
         }
     });
 }
-
-
 
 module.exports = {
     setupBotHandlers
