@@ -4,6 +4,9 @@ Telegram bot for people whose Steam account is in one region (e.g. Kazakhstan) w
 
 - Search a game → see its price in your Steam region, converted to your currency, plus the amount to pay including your top-up fee.
 - Send a number (e.g. `5000`) → get how much that Steam-currency amount costs in your currency.
+- Games with several editions (Deluxe, Ultimate…) list every edition with its price.
+- Tap **🔔 Watch for a discount** on a game card → the bot checks every 6 hours and messages you when the discount grows.
+- Inline mode: type `@your_bot elden ring` in any chat to share a price card.
 
 The bot UI is in Russian; the example below is translated.
 
@@ -58,8 +61,11 @@ pnpm dev
 | `/region`   | Change Steam region                               |
 | `/currency` | Change the currency you pay with                  |
 | `/fee 7.5`  | Set a custom top-up fee in percent                |
+| `/watchlist`| Games watched for discounts (tap to remove)       |
 
-Any other text is a game search; a plain number is an amount conversion.
+Any other text is a game search; a plain number is an amount conversion. The bot only answers in private chats.
+
+Inline mode must be enabled once in @BotFather (`/setinline`).
 
 ## Search limitations
 
@@ -81,10 +87,11 @@ The bot uses Steam's own store search. It matches title prefixes and official lo
 ```
 src/
   index.ts       entry point
-  bot/           commands, callbacks, onboarding, game card
+  bot/           commands, callbacks, onboarding, game card, inline mode
+                 watch.ts: periodic discount checker
   config/        env and external URLs
   constants/     regions, currencies, texts, limits
-  db/            SQLite users table
+  db/            SQLite users and watches tables
   rates/         exchange rates with cache
   steam/         Steam search and app details
   utils/         pure helpers + tests

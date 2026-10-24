@@ -1,7 +1,9 @@
-import { Bot, type Context, InlineKeyboard } from 'grammy';
+import { Bot, type Context, InlineKeyboard, InlineQueryResultBuilder } from 'grammy';
 import { config } from '../config/index.ts';
 import {
   CB,
+  EDITIONS_LIMIT,
+  INLINE_CACHE_SECONDS,
   FEE_PRESETS,
   HOME_CURRENCIES,
   KEYBOARD_COLUMNS,
@@ -10,12 +12,22 @@ import {
   type RegionCode,
   TEXTS,
 } from '../constants/index.ts';
-import { getUser, setUserField, type User } from '../db/index.ts';
+import {
+  addWatch,
+  getUser,
+  isWatching,
+  listWatches,
+  removeWatch,
+  setUserField,
+  type User,
+} from '../db/index.ts';
 import { getRate } from '../rates/index.ts';
-import { getGameDetails, searchGames } from '../steam/index.ts';
+import { type GameDetails, getGameDetails, searchGames } from '../steam/index.ts';
 import { convert, formatMoney, parseAmount, switchLayout } from '../utils/index.ts';
 
 type ReadyUser = User & { region: RegionCode; currency: string };
+// What price lines need from a user; also satisfied by watch rows.
+export type PriceSettings = Pick<ReadyUser, 'currency' | 'fee_percent'>;
 
 function grid(buttons: [label: string, data: string][]): InlineKeyboard {
   const kb = new InlineKeyboard();
@@ -30,6 +42,8 @@ const regionKeyboard = () =>
   grid(Object.entries(REGIONS).map(([code, r]) => [r.name, CB.region + code]));
 const currencyKeyboard = () => grid(HOME_CURRENCIES.map((c) => [c, CB.currency + c]));
 const feeKeyboard = () => grid(FEE_PRESETS.map((f) => [`${f}%`, CB.fee + f]));
+export const watchKeyboard = (appId: number, watching: boolean) =>
+  new InlineKeyboard().text(watching ? TEXTS.unwatch : TEXTS.watch, (watching ? CB.unwatch : CB.watch) + appId);
 
 function isReady(user: User): user is ReadyUser {
   return Boolean(user.region && user.currency && user.fee_set);
@@ -79,36 +93,62 @@ async function sendConversion(ctx: Context, user: ReadyUser, amount: number) {
   );
 }
 
+async function priceLines(amount: number, currency: string, user: PriceSettings): Promise<string[]> {
+  const rate = await getRate(currency, user.currency);
+  const { converted, toPay } = convert(amount, rate, user.fee_percent);
+  return [
+    `≈ ${formatMoney(converted, user.currency)} по курсу`,
+    `💳 К оплате с комиссией ${user.fee_percent}%: ${formatMoney(toPay, user.currency)}`,
+  ];
+}
+
+export async function gameCardText(game: GameDetails, user: PriceSettings): Promise<string> {
+  const lines = [`🎮 ${game.name}`, `Разработчик: ${game.developers}`];
+  if (game.price) {
+    const { currency, amount, formatted, discount } = game.price;
+    lines.push(`Цена в Steam: ${formatted}${discount ? ` (−${discount}%)` : ''}`, ...(await priceLines(amount, currency, user)));
+    if (game.editions.length > 1) {
+      const rate = await getRate(currency, user.currency);
+      lines.push('', `Издания (к оплате с комиссией ${user.fee_percent}%):`);
+      for (const e of game.editions.slice(0, EDITIONS_LIMIT)) {
+        const pay = convert(e.amount, rate, user.fee_percent).toPay;
+        lines.push(`• ${e.name} — ${formatMoney(e.amount, currency)} → ${formatMoney(pay, user.currency)}`);
+      }
+    }
+  } else if (game.releaseDate) {
+    lines.push(`${TEXTS.comingSoon} ${game.releaseDate}`);
+  } else {
+    lines.push('Цена: бесплатно');
+  }
+  lines.push('', game.link);
+  return lines.join('\n');
+}
+
 async function sendGameCard(ctx: Context, user: ReadyUser, appId: number) {
   const game = await getGameDetails(appId, user.region);
   if (!game) {
     await ctx.reply(TEXTS.unavailable);
     return;
   }
+  // Only priced games can go on sale.
+  const reply_markup = game.price ? watchKeyboard(appId, isWatching(user.telegram_id, appId)) : undefined;
+  await ctx.replyWithPhoto(game.image, { caption: await gameCardText(game, user), reply_markup });
+}
 
-  const lines = [`🎮 ${game.name}`, `Разработчик: ${game.developers}`];
-  if (game.price) {
-    const { currency, amount, formatted, discount } = game.price;
-    const rate = await getRate(currency, user.currency);
-    const { converted, toPay } = convert(amount, rate, user.fee_percent);
-    lines.push(
-      `Цена в Steam: ${formatted}${discount ? ` (−${discount}%)` : ''}`,
-      `≈ ${formatMoney(converted, user.currency)} по курсу`,
-      `💳 К оплате с комиссией ${user.fee_percent}%: ${formatMoney(toPay, user.currency)}`,
-    );
-  } else {
-    lines.push('Цена: бесплатно');
-  }
-  lines.push('', game.link);
-
-  await ctx.replyWithPhoto(game.image, { caption: lines.join('\n') });
+function watchlistMessage(telegramId: number) {
+  const watches = listWatches(telegramId);
+  if (!watches.length) return { text: TEXTS.watchlistEmpty, reply_markup: undefined };
+  const kb = new InlineKeyboard();
+  for (const w of watches) kb.text(`🔕 ${w.name}`, CB.unwatch + w.app_id).row();
+  return { text: TEXTS.watchlist, reply_markup: kb };
 }
 
 export function createBot(): Bot {
   const bot = new Bot(config.botToken);
 
-  // Every handler below relies on ctx.from (channel posts etc. have none).
-  bot.use((ctx, next) => (ctx.from ? next() : undefined));
+  // Private chats and inline queries only: in groups every message would trigger onboarding.
+  // Handlers also rely on ctx.from.
+  bot.use((ctx, next) => (ctx.from && (ctx.inlineQuery || ctx.chat?.type === 'private') ? next() : undefined));
 
   bot.command('start', async (ctx) => {
     await ctx.reply(TEXTS.greet);
@@ -118,6 +158,11 @@ export function createBot(): Bot {
   bot.command('settings', (ctx) => ctx.reply(settingsText(getUser(ctx.from!.id))));
   bot.command('region', (ctx) => ctx.reply(TEXTS.chooseRegion, { reply_markup: regionKeyboard() }));
   bot.command('currency', (ctx) => ctx.reply(TEXTS.chooseCurrency, { reply_markup: currencyKeyboard() }));
+
+  bot.command('watchlist', (ctx) => {
+    const { text, reply_markup } = watchlistMessage(ctx.from!.id);
+    return ctx.reply(text, { reply_markup });
+  });
 
   bot.command('fee', async (ctx) => {
     if (!ctx.match) {
@@ -154,6 +199,67 @@ export function createBot(): Bot {
     await ctx.answerCallbackQuery();
     const user = getUser(ctx.from.id);
     if (await ensureSetup(ctx, user)) await sendGameCard(ctx, user as ReadyUser, Number(ctx.match[1]));
+  });
+
+  bot.callbackQuery(new RegExp(`^${CB.watch}(\\d+)$`), async (ctx) => {
+    const user = getUser(ctx.from.id);
+    if (!(await ensureSetup(ctx, user))) return ctx.answerCallbackQuery();
+    const appId = Number(ctx.match[1]);
+    const game = await getGameDetails(appId, user.region!);
+    if (!game?.price) return ctx.answerCallbackQuery(TEXTS.unavailable);
+    addWatch(user.telegram_id, appId, game.name, game.price.discount);
+    await ctx.answerCallbackQuery(TEXTS.watchOn);
+    await ctx.editMessageReplyMarkup({ reply_markup: watchKeyboard(appId, true) });
+  });
+
+  bot.callbackQuery(new RegExp(`^${CB.unwatch}(\\d+)$`), async (ctx) => {
+    const appId = Number(ctx.match[1]);
+    removeWatch(ctx.from.id, appId);
+    await ctx.answerCallbackQuery(TEXTS.watchOff);
+    // Game cards and discount alerts are photos; otherwise it's the /watchlist message.
+    if (ctx.callbackQuery.message?.photo) {
+      await ctx.editMessageReplyMarkup({ reply_markup: watchKeyboard(appId, false) });
+    } else {
+      const { text, reply_markup } = watchlistMessage(ctx.from.id);
+      await ctx.editMessageText(text, { reply_markup });
+    }
+  });
+
+  bot.on('inline_query', async (ctx) => {
+    const query = ctx.inlineQuery.query.trim();
+    const user = getUser(ctx.from.id);
+    if (!isReady(user)) {
+      return ctx.answerInlineQuery([], {
+        button: { text: TEXTS.inlineSetup, start_parameter: 'setup' },
+        cache_time: 0,
+        is_personal: true,
+      });
+    }
+    if (!query) return ctx.answerInlineQuery([], { cache_time: 0 });
+
+    // Search results already carry prices, so no appdetails call per keystroke.
+    let games = await searchGames(query, user.region);
+    if (!games.length) games = await searchGames(switchLayout(query), user.region);
+
+    const results = await Promise.all(
+      games.map(async (g) => {
+        const lines = [`🎮 ${g.name}`];
+        let description: string = TEXTS.inlineNoPrice;
+        if (g.price) {
+          const { currency, amount, initial } = g.price;
+          const discount = initial > amount ? Math.round((1 - amount / initial) * 100) : 0;
+          const pay = await priceLines(amount, currency, user);
+          lines.push(`Цена в Steam: ${formatMoney(amount, currency)}${discount ? ` (−${discount}%)` : ''}`, ...pay);
+          description = pay[1]!;
+        } else {
+          lines.push(TEXTS.inlineNoPrice);
+        }
+        lines.push('', `${config.urls.steamApp}${g.id}/`);
+        return InlineQueryResultBuilder.article(String(g.id), g.name, { description, thumbnail_url: g.image })
+          .text(lines.join('\n'));
+      }),
+    );
+    await ctx.answerInlineQuery(results, { cache_time: INLINE_CACHE_SECONDS, is_personal: true });
   });
 
   bot.on('message:text', async (ctx) => {

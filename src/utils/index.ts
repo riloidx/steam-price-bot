@@ -30,3 +30,9 @@ export function parseAmount(text: string): number | null {
   if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
   return Number(normalized);
 }
+
+// Steam edition label "Name - <span ...>old</span> new" → "Name".
+export function editionName(optionText: string): string {
+  const i = optionText.lastIndexOf(' - ');
+  return (i > 0 ? optionText.slice(0, i) : optionText).replace(/<[^>]+>/g, '').trim();
+}

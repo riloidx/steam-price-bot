@@ -26,11 +26,12 @@ pnpm test        # node --test, src/**/*.test.ts
 - `index.ts` — запуск бота, меню команд, graceful shutdown.
 - `config/` — env + **все URL** внешних API.
 - `constants/` — регионы, валюты, пресеты комиссии, лимиты/таймауты, callback-префиксы, тексты.
-- `db/` — SQLite: таблица `users` (telegram_id, region, currency, fee_percent, fee_set). Схема создаётся при старте (`CREATE TABLE IF NOT EXISTS`); при изменении схемы добавлять `ALTER TABLE` рядом.
+- `db/` — SQLite: таблицы `users` (telegram_id, region, currency, fee_percent, fee_set) и `watches` (telegram_id, app_id, name, last_discount). Схема создаётся при старте (`CREATE TABLE IF NOT EXISTS`); при изменении схемы добавлять `ALTER TABLE` рядом.
 - `steam/` — поиск (`storesearch`) и детали игры (`appdetails`).
 - `rates/` — курсы с кэшем в памяти и fallback-зеркалом.
 - `utils/` — чистые функции (конвертация, формат денег, смена раскладки, парсинг суммы) + `getJson`. Не импортирует `config`, чтобы тесты не требовали env.
-- `bot/` — команды (`/start /settings /region /currency /fee`), callback'и, онбординг, карточка игры.
+- `bot/` — команды (`/start /settings /region /currency /fee /watchlist`), callback'и, онбординг, карточка игры (с изданиями), inline-режим. Только личные чаты.
+  - `bot/watch.ts` — раз в 6 ч проверяет отслеживаемые игры (по одному `appdetails` на игру×регион, пауза 1.5 с) и шлёт уведомление, когда скидка выросла.
 
 ## Правила
 - URL — только в `config/`, константы и тексты — только в `constants/`.
@@ -45,5 +46,6 @@ pnpm test        # node --test, src/**/*.test.ts
 
 ## Внешние API (без ключей)
 - Поиск: `store.steampowered.com/api/storesearch/?term=&cc=&l=russian` — находит по префиксу и официальному локализованному названию, **опечатки не прощает**. Если 0 результатов, повторяем с исправленной раскладкой (`ыефдлук` → `stalker`).
-- Детали: `store.steampowered.com/api/appdetails?appids=&cc=&l=russian`; `success:false` или нет `price_overview` у платной игры → недоступна в регионе.
+- Детали: `store.steampowered.com/api/appdetails?appids=&cc=&l=russian`; `success:false` или нет `price_overview` у платной вышедшей игры → недоступна в регионе. `release_date.coming_soon` → ещё не вышла. Издания — `package_groups[].subs[]` (`option_text` = «название - цена», у скидок с HTML).
+- Inline-режим берёт цену прямо из `storesearch` (`items[].price`), без `appdetails` на каждое нажатие.
 - Курсы: `fawazahmed0/exchange-api` (jsDelivr + `currency-api.pages.dev`), обновляются раз в сутки, кэш 12 ч.
